@@ -1,0 +1,32 @@
+# MEDIAPIPE - Google's hand tracking technology
+# This finds your hands in the camera image
+mediapipe==0.10.7
+
+# PROTOBUF - Helps mediapipe work (like a translator)
+protobuf==3.20.3
+
+# TENSORFLOW - The AI brain that learns patterns
+# This is what we'll train to recognize gestures
+tensorflow==2.13.0
+
+# KERAS - Part of tensorflow, makes building AI easier
+keras==2.13.1
+
+# OPENCV - Computer vision library (webcam + image processing)
+opencv-python==4.8.1.78
+opencv-contrib-python==4.8.1.78
+
+# CVZONE - Makes hand detection super easy (built on mediapipe)
+cvzone==1.6.1
+
+# NUMPY - Handles numbers and arrays (images are just numbers!)
+numpy==1.24.3
+
+# SCIKIT-LEARN - Helps split data into training/testing sets
+scikit-learn==1.2.2
+
+# MATPLOTLIB - Draws graphs to show training progress
+matplotlib==3.7.1
+
+# PYTTSX3 - TEXT-TO-SPEECH! Makes your computer speak
+pyttsx3==2.90
