@@ -1,11 +1,11 @@
-import cv2          #camera keliye
+import cv2          # camera use krne keliye and image processing keliye
 import numpy as np
-import tensorflow as tf     #model keliye
-from cvzone.HandTrackingModule import HandDetector      #hand detection keliye
+import tensorflow as tf     # model keliye
+from cvzone.HandTrackingModule import HandDetector      # hand detection keliye
 import os
-from collections import deque       #double ended queue for prediction history
-import pyttsx3      #text to speech
-import threading    #to run speech in bg taake camera block na hojaye
+from collections import deque       # double ended queue for prediction history
+import pyttsx3      # text to speech
+import threading    # to run speech in bg taake camera block na hojaye
 
 print("-"*50)
 print("Real-Time Sign Language Recognition".center(50))
@@ -32,53 +32,50 @@ except:
 try:
     import pickle
     with open('models/class_mapping.pkl', 'rb') as f:
-        mapping = pickle.load(f)            #reconstructing the dict
+        mapping = pickle.load(f)            # reconstructing the dict
         classes = mapping['classes']
     print(f"Loaded {len(classes)} classes")
 except:
     print("Error loading class mapping")
     exit()
 
-cap = cv2.VideoCapture(0)
-cap.set(3, 1280)
-cap.set(4, 720)
+cap = cv2.VideoCapture(0)       # default camera
+cap.set(3, 1280)        # width
+cap.set(4, 720)         # height
 
 # cap.set(cv2.CAP_PROP_AUTOFOCUS, 0) 
 # cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)  
 
-detector = HandDetector(detectionCon=0.8, maxHands=1)
-
+detector = HandDetector(detectionCon=0.8, maxHands=2)   # dono hands detect karo, baad mein right hand filter karenge
 
 try:
-    tts_engine = pyttsx3.init()             #initializing the speech engine
-    tts_engine.setProperty('rate', 150)     #bolne ki speed
+    tts_engine = pyttsx3.init()             # initializing speech engine
+    tts_engine.setProperty('rate', 150)     # bolne ki speed
     tts_available = True
 except:
     tts_available = False
 
 IMG_SIZE = 128
-prediction_history = deque(maxlen=3)        #last 3 predictions ko store karega for smoothing
+prediction_history = deque(maxlen=3)        # last 3 predictions store for smoothing
 current_sentence = []
-last_prediction = None              #smoothing ke liye last prediction ko track karega
-prediction_counter = 0              #same prediction ke consecutive frames ko count karega for confirmation
-CONFIRMATION_THRESHOLD = 12         #kitne consecutive frames me same prediction aana chahiye before confirming it
-confidence_threshold = 0.8          #model should be 80% sure before we consider a prediction valid
-
-just_cleared = False                #if frame mein hand nhi nazar aarha
+last_prediction = None              # previous smoothed prediction track karne keliye
+prediction_counter = 0              # consecutive frames count for same gesture
+CONFIRMATION_THRESHOLD = 12         # 12 consecutive frames required before adding letter
+confidence_threshold = 0.8          # model should be 80% sure
+just_cleared = False                # hand reappeared after being absent
 
 def speak_text(text):
     if tts_available and text:
         def speak():
-            tts_engine.say(text)            #jo sentence likha hai wo bolo
-            tts_engine.runAndWait()         #blocks taake jo bol rha hai pehle wo bolo
-        threading.Thread(target=speak, daemon=True).start()     #separate thread, daemon mtlb again main end to ye bhi and start this
+            tts_engine.say(text)
+            tts_engine.runAndWait()
+        threading.Thread(target=speak, daemon=True).start()
 
 def preprocess_hand(img_hand):
     if img_hand.size == 0:
         return None
     
     h, w = img_hand.shape[:2]
-    
     img_white = np.ones((300, 300, 3), np.uint8) * 255
     
     if h > w:
@@ -95,12 +92,9 @@ def preprocess_hand(img_hand):
         img_white[y_offset:y_offset + new_h, :] = img_resize
     
     img_final = cv2.resize(img_white, (IMG_SIZE, IMG_SIZE))
-    
-    img_final = cv2.cvtColor(img_final, cv2.COLOR_BGR2RGB)      #opencv to model
+    img_final = cv2.cvtColor(img_final, cv2.COLOR_BGR2RGB)      # BGR to RGB
     img_final = img_final.astype(np.float32) / 255.0
-    
-    return np.expand_dims(img_final, axis=0)        #model needs batch size as well to hum usey 1 rkh lete hain
-
+    return np.expand_dims(img_final, axis=0)        # add batch dimension
 
 print("\nCONTROLS:")
 print("  c - Clear sentence")
@@ -115,80 +109,83 @@ while True:
     if not success:
         break
     
-    display_img = cv2.flip(img, 1)
-    
-    hands, _ = detector.findHands(img, draw=True)  
+    display_img = cv2.flip(img, 1)      # mirror for display
+    hands, _ = detector.findHands(img, draw=True)   # original image pe detection
     
     current_prediction = None
     confidence = 0.0
     img_cropped = None
     
     if hands:
-
-        if just_cleared:                    #hand reappears after being absent, reset smoothing state
+        if just_cleared:                    # hand reappears after absence -> reset smoothing
             prediction_history.clear()
             last_prediction = None
             prediction_counter = 0
             just_cleared = False
+        
+        # sirf right hand pick karo (jaise collect_data mein kiya tha)
+        right_hand = None
+        for h in hands:
+            if h['type'] == 'Right':
+                right_hand = h
+                break
+        
+        if right_hand is None:
+            # agar right hand nahi hai to skip (kuch mat karo)
+            pass
+        else:
+            x, y, w, h = right_hand['bbox']
+            padding = 60
+            x_start = max(0, x - padding)
+            x_end = min(img.shape[1], x + w + padding)
+            y_start = max(0, y - padding)
+            y_end = min(img.shape[0], y + h + padding)
+            img_cropped = img[y_start:y_end, x_start:x_end]
             
-        hand = hands[0]                 #saari wohi cheezein hain
-        x, y, w, h = hand['bbox']
-        
-        padding = 60
-        x_start = max(0, x - padding)
-        x_end = min(img.shape[1], x + w + padding)
-        y_start = max(0, y - padding)
-        y_end = min(img.shape[0], y + h + padding)
-        
-        img_cropped = img[y_start:y_end, x_start:x_end]
-        
-        
-        if img_cropped.size > 0:
-            img_processed = preprocess_hand(img_cropped)            #for model input
-            
-            if img_processed is not None:
-                predictions = model.predict(img_processed, verbose=0)[0]    #no progress bar, basically model ko img di and wo saari possibilities de rha hai after checking the img for each class, 0 bcz batch mein 1 hi hai
-                pred_idx = np.argmax(predictions)       #index of the class with highest confidence
-                confidence = predictions[pred_idx]
-                
-                if confidence > confidence_threshold:
-                    current_prediction = classes[pred_idx]          
-                    prediction_history.append(current_prediction)   #storing the current prediction
+            if img_cropped.size > 0:
+                img_processed = preprocess_hand(img_cropped)
+                if img_processed is not None:
+                    predictions = model.predict(img_processed, verbose=0)[0]
+                    pred_idx = np.argmax(predictions)
+                    confidence = predictions[pred_idx]
                     
-                    if len(prediction_history) == prediction_history.maxlen:        #if we have 3 images in history tabhi final official prediction nikalenge, tabhi smoothing hoga
-                        from collections import Counter
-                        counter = Counter(prediction_history)       #counting how many times each prediction appeared in the last 3 frames
-                        smoothed = counter.most_common(1)[0][0]     #most common, 0=first tuple, 0=class name
+                    if confidence > confidence_threshold:
+                        current_prediction = classes[pred_idx]
+                        prediction_history.append(current_prediction)
                         
-                        display_x = display_img.shape[1] - x - w        #phir se wohi jo collect_data mein hua tha
-                        cv2.rectangle(display_img, (display_x, y), (display_x + w, y + h), (0, 255, 0), 3)
-                        cv2.putText(display_img, f"{smoothed}", (display_x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                        
-                        if smoothed == last_prediction:         #if pichla aur abhi wala same hai, toh counter badhao, warna reset karo
-                            prediction_counter += 1
-                        else:
-                            last_prediction = smoothed
-                            prediction_counter = 1
-                            prediction_history.clear() 
-                            prediction_history.append(smoothed) 
-                        
-                        if prediction_counter == CONFIRMATION_THRESHOLD:    #if same for 12 consecutive frames, tabhi add to sentence and speak
-                            current_sentence.append(smoothed)
-                            print(f"Added: {smoothed}")
-                            if tts_available:
-                                speak_text(smoothed)
-
-                            prediction_counter = 0      #avoid multiple additions for the same sign
-                            last_prediction = None 
+                        if len(prediction_history) == prediction_history.maxlen:
+                            from collections import Counter
+                            counter = Counter(prediction_history)
+                            smoothed = counter.most_common(1)[0][0]
                             
+                            display_x = display_img.shape[1] - x - w
+                            cv2.rectangle(display_img, (display_x, y), (display_x + w, y + h), (0, 255, 0), 3)
+                            cv2.putText(display_img, f"{smoothed}", (display_x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                            
+                            if smoothed == last_prediction:
+                                prediction_counter += 1
+                            else:
+                                last_prediction = smoothed
+                                prediction_counter = 1
+                                prediction_history.clear()
+                                prediction_history.append(smoothed)
+                            
+                            if prediction_counter == CONFIRMATION_THRESHOLD:
+                                current_sentence.append(smoothed)
+                                print(f"Added: {smoothed}")
+                                if tts_available:
+                                    speak_text(smoothed)
+                                prediction_counter = 0
+                                last_prediction = None
     else:
-        prediction_history.clear()      #if no hand detected, clear history and reset smoothing state
+        # agar koi hand nahi hai to sab clear karo
+        prediction_history.clear()
         last_prediction = None
         prediction_counter = 0
-        just_cleared=True
+        just_cleared = True
 
-
-    controls_y = 50             #control panel
+    # control panel (semi-transparent box)
+    controls_y = 50
     controls_list = [
         "CONTROLS:",
         "c - Clear",
@@ -204,7 +201,7 @@ while True:
     
     for i, text in enumerate(controls_list):
         color = (255, 255, 255) if i == 0 else (200, 200, 200)
-        cv2.putText(display_img, text, (display_img.shape[1]-240, controls_y + i*25),  cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+        cv2.putText(display_img, text, (display_img.shape[1]-240, controls_y + i*25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
     
     sentence_text = ''.join(current_sentence) if current_sentence else "NO GESTURES YET"
     y_pos = display_img.shape[0] - 50
@@ -215,28 +212,24 @@ while True:
     
     key = cv2.waitKey(1) & 0xFF
     
-    if key == ord('c'):             #ascii conversion of c
+    if key == ord('c'):
         current_sentence = []
         print("Sentence cleared")
-    
-    elif key == 32:             #space
+    elif key == 32:          # space
         current_sentence.append(' ')
         print("Added space")
-    
-    elif key == 8:              #backspace
+    elif key == 8:           # backspace
         if current_sentence:
             removed = current_sentence.pop()
             print(f"Removed: {removed if removed != ' ' else 'space'}")
         else:
             print("Nothing to remove")
-    
-    elif key == ord('s'):       #s ko ascii mein convert kia
+    elif key == ord('s'):
         if current_sentence and tts_available:
             text = ''.join(current_sentence)
             speak_text(text)
             print(f"Speaking: {text}")
-    
-    elif key == 27:              #esc
+    elif key == 27:          # ESC
         print("\n>>> CLOSING...")
         cv2.putText(display_img, "CLOSING...", (display_img.shape[1]//2-100, display_img.shape[0]//2), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3)
         cv2.imshow("Sign Language Recognition", display_img)
