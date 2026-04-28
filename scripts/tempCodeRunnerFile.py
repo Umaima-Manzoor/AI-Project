@@ -21,6 +21,6 @@ print(f"TOTAL: {total} images")
 print("="*50)
 
 if total < 2600:  # 36 classes * ~70 images each
-    print("\n💡 TIP: Keep collecting! Aim for at least 50-70 images per class")
+    print("\nTIP: Keep collecting! Aim for at least 50-70 images per class")
 else:
     print("\n Great! You have enough data to train")
